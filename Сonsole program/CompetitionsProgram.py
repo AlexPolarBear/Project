@@ -544,3 +544,5 @@ class StartingConsole(object):
 if __name__ == "__main__":
     sc = StartingConsole()
     sc.greetings_farewell()
+    
+    
