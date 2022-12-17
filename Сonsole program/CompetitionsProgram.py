@@ -42,7 +42,7 @@ class TableInformation(object):
     This class is used to process data from HTML
     into pandas tables for comfort. They are divided into categories:
     a general table and a table with all participants.
-    It is having three main methods.
+    It is having four main methods.
 
     Methods
     -------
@@ -50,6 +50,8 @@ class TableInformation(object):
         Search for all category links in HTML and returns all participants.
     parser_links():
         Create a table with all participants.
+    category_in_links():
+       Add column category to table participants.
     category_information():
         Create a table with all general data in HTML.
     """
@@ -88,14 +90,13 @@ class TableInformation(object):
         # Save column titles.
         if len(link_column_name) > 0 and \
                 len(link_column_name) != n_link_column:
-            raise Exception("Column titles do not match the number of columns")
+            print("Column titles do not match the number of columns.")  # Instead of Exception
 
         for link in link_url:
             response = requests.get(link)
             soup = BeautifulSoup(response.content, 'html.parser')
             list_of_participants = soup.find('table', class_='table')
-            n_rows += len(list_of_participants.find_all('tr'))
-            n_rows -= 1
+            n_rows += (len(list_of_participants.find_all('tr')) - 1)
 
         columns = link_column_name if len(link_column_name) > 0 \
             else range(0, n_link_column)
@@ -134,7 +135,20 @@ class TableInformation(object):
                 if len(columns) > 0:
                     row_number += 1
 
+        return participants, number
+
+    @staticmethod
+    def category_in_links():
+        """
+        This method add column category to table participants.
+        :return: pandas table with participants.
+        :rtype: DataFrame.
+        """
+
         data_from_url = TableInformation()
+        parse_participants = data_from_url.parser_links()
+        participants, number = parse_participants
+
         all_table_data = data_from_url.category_information()
         category_name = []
         for one in all_table_data['Категория']:
@@ -219,16 +233,13 @@ class Matcher(object):
         """
 
         data_from_url = TableInformation()
-        links_data = data_from_url.parser_links()
-
-        file_ext = r"*.xlsx"
-        path = list(pathlib.Path().glob(file_ext))
+        links_data = data_from_url.category_in_links()
 
         # First parse two need table.
-        length = len(path)
-        df = pd.ExcelFile(path[length - 1])
-        if length == 0:
-            print("Excel file not found. Please upload file to the folder.")  # Instead of exception.
+        df = pd.ExcelFile('База клиентов.xlsx')
+        if df == 0:
+            print(" Excel file not found."  # Instead of exception.
+                  " Please upload file to the folder or change name of the file.")
         list_to_match = df.parse()
         list_of_participants = links_data
 
@@ -330,11 +341,6 @@ class SaveResultsInTable(object):
         df = pd.ExcelFile(path[length - 1])
         list_with_contacts = df.parse()
 
-        # TODO: Find right contact
-        contacts = []
-        for one in list_with_contacts['Контакт']:
-            contacts.append(one)
-
         pairs = []
         category = []
         x = 1
@@ -348,35 +354,10 @@ class SaveResultsInTable(object):
         data = {'Пара': pairs, 'Категория': category}  # Add 'Контакты': contacts
         today = str(datetime.datetime.today().strftime("%d-%m-%Y_%H.%M.%S"))
         result = pd.DataFrame(data)
+        end_result = result.merge(list_with_contacts, how='left', left_on='Пара', right_on='Пара')
 
-        """pair_from_file = []
-        for one in list_with_contacts['Пара']:
-            pair_from_file.append(one)
-
-        count = 0
-        count_list = []
-        for one in pair_from_file:
-            cross = dl.get_close_matches(one, pairs, n=1, cutoff=0.9)
-            count += 1
-            if len(cross) > 0:
-                count_list.append(count)
-
-        contact_names = []
-        for one in count_list:
-            one_contact = list_with_contacts.loc[one // 2, 'Контакт']
-            contact_names.append(one_contact)
-
-        a = b = c = 0
-        new_contacts = []
-        for one in range(len(contact_names)):
-            b += one
-            while c != b:
-                new_contacts.append(contact_names[a])
-                c += 1
-            a += 1
-        result.insert(4, 'Контакт', new_contacts)"""
         # TODO: красиво сохранять excel
-        end = result.style.set_properties(**{'text-align': 'right'})
+        end = end_result.style.set_properties(**{'text-align': 'right'})
         print('The results save in file Result_', today, '.xlsx\n')
         end.to_excel('Result_' + today + '.xlsx')
         return result
@@ -405,7 +386,7 @@ class SaveResultsInTable(object):
             cross = dl.get_close_matches(one, second_to_last, n=1, cutoff=0.9)
             if len(cross) == 0:
                 count += 1
-                last.style.apply('background-color: SkyBlue')
+                last.style.apply('background-color: gray')
 
         return last, count
 
@@ -463,12 +444,10 @@ class StartingConsole(object):
         print(steaks, end='\n')
         time.sleep(2)
 
-        # Calling the basic information from another method.
         console_class = StartingConsole()
-        console_class.out_results()
+        console_class.out_results()  # The basic information from another method.
 
-        # Need to output the information about matches of participants.
-        matching_data = Matcher()
+        matching_data = Matcher()  # Output the information about matches.
         matching_search = matching_data.find_match()
 
         new_results, new_category = matching_search
@@ -487,12 +466,11 @@ class StartingConsole(object):
         print(steaks, end='\n')
         time.sleep(2)
 
-        # Save results of matching.
-        save_class = SaveResultsInTable()
+        save_class = SaveResultsInTable()  # Save results of matching.
         save_class.save_result_of_matching()
 
-        # Farewell.
-        print(shift * 18, "That's all information.\n", shift * 20, "Have a nice day!\n")
+        print(shift * 18, "That's all information.\n", shift * 20,
+              "Have a nice day!\n")  # Farewell.
 
     @staticmethod
     def out_results():
@@ -505,8 +483,7 @@ class StartingConsole(object):
         steaks = '-' * 63
         shift = ' '
 
-        # Processing the information about competitions.
-        data_from_url = TableInformation()
+        data_from_url = TableInformation()  # The information about competitions.
         all_table_data = data_from_url.category_information()
         inform_category = all_table_data
 
@@ -515,18 +492,17 @@ class StartingConsole(object):
         year = date_now[0]
         month = date_now[1]
         day = date_now[2]
-        to_day = ''.join(day + '.' + month).split()
+        today = ''.join(day + '.' + month).split()
 
         date_after = []
         category_after = []
         for one in inform_category['Дата']:
-            if str(to_day) <= one:
+            if str(today) <= one:
                 date_after.append(one)  # Nearest dates after today.
         for one in inform_category[inform_category['Дата'].isin(date_after)]['Категория']:
             category_after.append(one)  # Names of "after today" competitions.
 
-        # Output the information about today's date
-        # and nearest competitions with date.
+        # Output the information about the nearest competitions with date.
         print(f" Today's date: {day}.{month}.{year}.\n")
         if len(date_after) > 0:
             print(" The nearest upcoming competitions:\n"
@@ -544,5 +520,3 @@ class StartingConsole(object):
 if __name__ == "__main__":
     sc = StartingConsole()
     sc.greetings_farewell()
-    
-    
