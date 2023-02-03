@@ -8,40 +8,158 @@ import datetime
 from bs4 import BeautifulSoup
 
 
-class HTMLTableParser(object):
+class MainSiteParser(object):
     """
-    This class is used to parse HTML as a string.
-    It is having one main method.
+    This class is used to parse HTML from main site.
+    It is having four main methods.
 
     Methods
     -------
-    parser_url():
-        Read HTMl, parse it and return the result in one string.
+    parse_website():
+        Read HTMl, parse it and
+        return two parameters (start and end of the month).
+    find_all_on_line_register():
+        Collect all links with online registration.
+    use_data_main_site():
+        Collect the information about events and
+        save links to participants category.
+    one_site():
+        This method search all links in registration and parse it as a string.
     """
 
     @staticmethod
-    def parser_url():
+    def parse_website():
         """
-        This method parse the HTML as a string
-        with need table in there.
-        :return: html after parsing as a string
+        This method parse the HTML from main site
+        at the beginning and end of the month.
+
+        :return start_part, end_part: two HTMl at the beginning and end of the month.
         :rtype: NavigableString
         """
+        to_day = date.today()  # Find date values that need to search.
+        today_month = to_day.strftime('%m')
+        today_year = to_day.strftime('%Y')
+        end_date = to_day + datetime.timedelta(days=28)  # Short February.
+        end_month = end_date.strftime('%m')
+        end_year = end_date.strftime('%Y')
 
-        response = requests.get('https://dance.vftsarr.ru/reg_module/?mode=reglists&competition_id=97')
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.content, 'html.parser')
-            list_of_competition = soup.find('table', class_='table')
-            return list_of_competition
+        from_url = f'https://dance.vftsarr.ru/index.php?id=2&type=0&Show_Month=' \
+                   f'{today_month}&Show_Year={today_year}'
+        to_url = f'https://dance.vftsarr.ru/index.php?id=2&type=0&Show_Month=' \
+                 f'{end_month}&Show_Year={end_year}'
+
+        from_response = requests.get(from_url)
+        to_response = requests.get(to_url)
+        if from_response.status_code == 200 and to_response.status_code == 200:
+            from_soup = BeautifulSoup(from_response.content, 'html.parser')
+            to_soup = BeautifulSoup(to_response.content, 'html.parser')
+            start_part = from_soup.find('tbody')
+            end_part = to_soup.find('tbody')
+            return start_part, end_part
         else:
             print("Bad request.")  # Instead of exceptions.
+
+    @staticmethod
+    def find_all_on_line_register():
+        """
+        This method collects all links with online registration.
+
+        :return tr_tags: The list with registration links.
+        :rtype: list
+        """
+        main_parser = MainSiteParser()
+        parser_urls = main_parser.parse_website()
+        start_part, end_part = parser_urls
+
+        to_day = date.today()
+        end_date = to_day + datetime.timedelta(days=28)
+
+        tr_tags = []
+        for one in start_part.find_all('tr'):
+            if one.select('a[href^="https://dance.vftsarr.ru/reg_module/"]') and \
+                    (one.find('td', class_="MY").get_text(separator='.') >= to_day.strftime('%d.%m.%Y')):
+                tr_tags.append(one)
+        for one in end_part.find_all('tr'):
+            if one.select('a[href^="https://dance.vftsarr.ru/reg_module/"]') and \
+                    (one.find('td', class_="MY").get_text(separator='.') <= end_date.strftime('%d.%m.%Y')):
+                tr_tags.append(one)
+        return tr_tags
+
+    @staticmethod
+    def use_data_main_site():
+        """
+        This method gets information about the event
+        and saves links registration categories.
+
+        :return main_table: The table with information.
+        :rtype: DataFrame
+        """
+        main_parser = MainSiteParser()
+        find_tags = main_parser.find_all_on_line_register()
+        tr_tags = find_tags
+
+        dates = []
+        name = []
+        city_organizes = []
+        online_register = []
+        for one in tr_tags:
+            dates.append(one.find('td', class_="MY").get_text(separator='.'))
+            name.append(one.select_one('td > font[size="1"]').get_text(separator='\n')
+                        + '\n' + one.select_one('td > font[size="2"]').get_text(separator='\n'))
+            city_organizes.append(one.find('td', valign="top").get_text(separator='\n'))
+            online_register.append(one.select_one(
+                'a[href^="https://dance.vftsarr.ru/reg_module/"]')['href'])
+
+        def multiple_replace(target_str, replace_values):
+            """
+            This method changes the value in links to lists with participants.
+
+            :param target_str: the string to change.
+            :param replace_values: changed values in the form of "key - value".
+            :return target_str: the string after change.
+            :rtype: str
+            """
+            for word, changed in replace_values.items():
+                target_str = str(target_str).replace(word, changed)
+            return target_str
+
+        values = {'?mode=registration&competition': '?mode=reglists&competition',
+                  '?competition': '?mode=reglists&competition', "'": "", "[": "", "]": ""}
+        on_register = multiple_replace(online_register, values)
+        online_register = on_register.split(', ')
+
+        data = {"Дата": dates, "Соревнование": name,
+                "Город, организатор": city_organizes, "Регистрация": online_register}
+        main_table = pd.DataFrame(data).drop_duplicates(keep='first')
+        return main_table
+
+    @staticmethod
+    def one_site():
+        """
+        This method search all links in registration and parse it as a string.
+
+        :return list_of_competition: list with links.
+        :rtype: list.
+        """
+
+        main_parser = MainSiteParser()
+        main_table = main_parser.use_data_main_site()
+
+        list_of_competition = []
+        for one in main_table['Регистрация']:
+            response = requests.get(one)
+            soup = BeautifulSoup(response.content, 'html.parser')
+            list_of_competition.append(soup.find('table', class_='table'))
+        return list_of_competition
+
+# TODO heck... That needs to fix after main site rewrite ↓↓↓
 
 
 class TableInformation(object):
     """
-    This class is used to process data from HTML
-    into pandas tables for comfort. They are divided into categories:
-    a general table and a table with all participants.
+    This class is used to process data from HTML into pandas tables.
+    They are divided into categories: a general table and a table
+    with all participants.
     It is having four main methods.
 
     Methods
@@ -60,12 +178,13 @@ class TableInformation(object):
     def links_to_table():
         """
         This method search all links in HTML and parse it as a string.
-        :returns: all links in string and pandas table with participants.
-        :rtype: list and DataFrame.
-        """
 
-        html_parser = HTMLTableParser()  # Object from method of different class.
-        parse_main_table = html_parser.parser_url()
+        :returns link_url: all links in string.
+        :return participants: pandas table with participants.
+        :rtype: list, DataFrame.
+        """
+        html_parser = MainSiteParser()
+        parse_main_table = html_parser.one_site()
 
         link_column_name = []
         n_link_column = 0
@@ -88,28 +207,24 @@ class TableInformation(object):
                 link_column_name.append(th.get_text())
 
         # Save column titles.
-        if len(link_column_name) > 0 and \
-                len(link_column_name) != n_link_column:
-            print("Column titles do not match the number of columns.")  # Instead of Exception
-
         for link in link_url:
             response = requests.get(link)
             soup = BeautifulSoup(response.content, 'html.parser')
             list_of_participants = soup.find('table', class_='table')
             n_rows += (len(list_of_participants.find_all('tr')) - 1)
-
         columns = link_column_name if len(link_column_name) > 0 \
             else range(0, n_link_column)
         participants = pd.DataFrame(columns=columns, index=range(1, (n_rows + 1)))
-
         return link_url, participants
 
     @staticmethod
     def parser_links():
         """
         This method add data to participants table.
-        :return: pandas table with participants.
-        :rtype: DataFrame.
+
+        :return participants: pandas table with participants.
+        :return number: number of category.
+        :rtype: DataFrame, list
         """
 
         data_from_url = TableInformation()
@@ -141,7 +256,8 @@ class TableInformation(object):
     def category_in_links():
         """
         This method add column category to table participants.
-        :return: pandas table with participants.
+
+        :return participants: pandas table with participants.
         :rtype: DataFrame.
         """
 
@@ -170,12 +286,13 @@ class TableInformation(object):
     def category_information():
         """
         This method create a new table of all general data from HTML.
-        :return: pandas table with all general data in HTML.
+
+        :return all_category: pandas table with all general data in HTML.
         :rtype: DataFrame.
         """
 
-        html_parser = HTMLTableParser()
-        parse_main_table = html_parser.parser_url()
+        html_parser = MainSiteParser()
+        parse_main_table = html_parser.one_site()
 
         # Find number of rows and columns. And find the columns titles.
         n_columns = len(parse_main_table.find_all('th', scope='col')) - 1  # Set the number of columns for table.
@@ -310,7 +427,7 @@ class SaveResultsInTable(object):
     """
     This class is used to save results of parsing im Excel table,
     and match new results with past.
-    It is having tree main methods.!!!
+    It is having two main methods.
 
     Methods
     -------
@@ -318,8 +435,6 @@ class SaveResultsInTable(object):
         Create Excel table with results.
     match_results():
         Match new results with past.
-    save_coloured_table():
-        Save result of matching last results.
     """
 
     @staticmethod
@@ -332,7 +447,6 @@ class SaveResultsInTable(object):
 
         matching_data = Matcher()
         matching_search = matching_data.find_match()
-
         single, category_name = matching_search
 
         file_ext = r"*.xlsx"
@@ -352,85 +466,32 @@ class SaveResultsInTable(object):
             x += 2
 
         data = {'Пара': pairs, 'Категория': category}  # Add 'Контакты': contacts
-        today = str(datetime.datetime.today().strftime("%d-%m-%Y_%H.%M.%S"))
         result = pd.DataFrame(data)
         end_result = result.merge(list_with_contacts, how='left', left_on='Пара', right_on='Пара')
-
-        # TODO: красиво сохранять excel
-        end = end_result.style.set_properties(**{'text-align': 'right'})
-        print('The results save in file Result_', today, '.xlsx\n')
-        end.to_excel('Result_' + today + '.xlsx')
-        return result
-
-    @staticmethod
-    def match_results():
-        """
-        This method is match the last result and second-to-last result,
-        and paints the cell blue.
-        :return: Coloured table with match.
-        :rtype: DataFrame
-        """
-
-        save_class = SaveResultsInTable()
-        result_of_matching = save_class.save_result_of_matching()
-        last = result_of_matching  # The last file.
-
-        file_ext = r"*.xlsx"
-        path = list(pathlib.Path().glob(file_ext))
-        length = len(path)
-        df = pd.ExcelFile(path[length - 3])
-        second_to_last = df.parse()  # The past file, before last.
-        # TODO: разобрать на пары и сравнивать, если нашёл то, что не было, то раскрасить и сохранить
-        count = 0
-        for one in last:
-            cross = dl.get_close_matches(one, second_to_last, n=1, cutoff=0.9)
-            if len(cross) == 0:
-                count += 1
-                last.style.apply('background-color: gray')
-
-        return last, count
-
-    # TODO: make so that methods call each other
-    @staticmethod
-    def save_coloured_table():
-        """
-        This method save result of matching last results.
-        :return: None
-        """
-
-        save_class = SaveResultsInTable()
-        result_of_matching = save_class.match_results()
-        last, count = result_of_matching  # The last file with marks.
-
-        new = len(last['Пара']) - count // 2
-        print('There were matches with the previous file:', count,
-              'and', new, 'new ones.')
-        answer = input('Do you want to save the matching results to a Excel file?\n'
-                       'Answers: yes or no.')
-        today = str(datetime.datetime.today().strftime("%d-%m-%Y_%H.%M.%S"))
-        if answer == 'yes':
-            last.to_excel('Matching' + today + '.xlsx')
+        return end_result
 
 
 class StartingConsole(object):
     """
     This class is have to use program from console
     and print information about program's work.
-    It is having two main methods.
+    It is having three main methods.
 
     Methods
     -------
-    greetings_farewell():
+    greetings():
         Output a greeting and a farewell.
     out_results():
         Outputs the main information of competition and events,
         and the result of the matched participants from file.
+    farewell():
+        Ends the console program and outputs a goodbye.
     """
 
     @staticmethod
-    def greetings_farewell():
+    def greetings():
         """
-        This method outputs a greeting and a farewell.
+        This method outputs a greeting.
         :return: None.
         """
 
@@ -466,11 +527,8 @@ class StartingConsole(object):
         print(steaks, end='\n')
         time.sleep(2)
 
-        save_class = SaveResultsInTable()  # Save results of matching.
-        save_class.save_result_of_matching()
-
-        print(shift * 18, "That's all information.\n", shift * 20,
-              "Have a nice day!\n")  # Farewell.
+        console_class = StartingConsole()
+        console_class.farewell()
 
     @staticmethod
     def out_results():
@@ -516,7 +574,28 @@ class StartingConsole(object):
             print(" There are no upcoming competitions.")
         print(steaks, end='\n')
 
+    @staticmethod
+    def farewell():
+        """
+        This method ends the console program and outputs a goodbye.
+        :return: None
+        """
+
+        shift = ' '
+
+        save_class = SaveResultsInTable()  # Save results of matching.
+        saved_result = save_class.save_result_of_matching()
+        end_result = saved_result
+
+        today = str(datetime.datetime.today().strftime("%d-%m-%Y_%H.%M.%S"))
+        end = end_result.style.set_properties(**{'text-align': 'right'})
+        print(' The results save in file Result_', today, '.xlsx\n')
+        end.to_excel('Result_' + today + '.xlsx')
+
+        print(shift * 18, "That's all information.\n", shift * 20,
+              "Have a nice day!\n")  # Farewell.
+
 
 if __name__ == "__main__":
     sc = StartingConsole()
-    sc.greetings_farewell()
+    sc.greetings()
